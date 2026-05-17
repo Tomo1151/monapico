@@ -38,6 +38,24 @@ const PICO_VOLUME_LABEL = "RPI-RP2";
 const DEFAULT_BAUD_RATE = 115200;
 const PICO_WATCH_INTERVAL_MS = process.platform === "win32" ? 2000 : 1000;
 
+const PICO_PATH_PREFIX = "pico:";
+const PICO_ROOT_PATH = "pico:/";
+const RAW_REPL_ENTER = "\x01";
+const RAW_REPL_EXIT = "\x02";
+const RAW_REPL_INTERRUPT = "\x03";
+const RAW_REPL_EOT = "\x04";
+const RAW_REPL_READY_TOKEN = "raw REPL; CTRL-B to exit";
+const RAW_REPL_DEFAULT_TIMEOUT_MS = 4000;
+
+type SerialCapture = {
+  buffer: string;
+  match: (buffer: string) => boolean;
+  resolve: (data: string) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
+let serialCapture: SerialCapture | null = null;
 const runPowerShell = async (command: string) => {
   try {
     const { stdout } = await execFileAsync(
@@ -65,6 +83,23 @@ const hasLinuxMountWithLabel = async (label: string) => {
     }
   }
   return false;
+};
+
+const isPicoPath = (value: string) => value.startsWith(PICO_PATH_PREFIX);
+
+const toDevicePath = (picoPath: string) => {
+  const stripped = picoPath.replace(/^pico:\/*/i, "");
+  const normalized = `/${stripped}`.replace(/\/+$/g, "");
+  return normalized === "" ? "/" : normalized.replace(/\/+/g, "/");
+};
+
+const toPicoPath = (devicePath: string) => {
+  const normalized = devicePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  return normalized ? `${PICO_PATH_PREFIX}/${normalized}` : PICO_ROOT_PATH;
+};
+
+const escapePyString = (value: string) => {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 };
 
 const isPicoSerialPort = (port: DetectedPortInfo) => {
@@ -119,8 +154,10 @@ const detectPicoBootVolume = async () => {
   return false;
 };
 
-const detectPicoConnection = async () => {
-  const serialFound = await detectPicoSerialConnection();
+const detectPicoConnection = async (ports?: DetectedPortInfo[]) => {
+  const serialFound = ports
+    ? ports.some(isPicoSerialPort)
+    : await detectPicoSerialConnection();
   if (serialFound) return true;
   return await detectPicoBootVolume();
 };
@@ -138,6 +175,126 @@ const serializePortInfo = (port: DetectedPortInfo) => ({
   productId: port.productId,
   pnpId: port.pnpId,
 });
+
+const resolveSerialCapture = (data: string) => {
+  if (!serialCapture) return;
+  clearTimeout(serialCapture.timer);
+  const { resolve } = serialCapture;
+  serialCapture = null;
+  resolve(data);
+};
+
+const rejectSerialCapture = (error: Error) => {
+  if (!serialCapture) return;
+  clearTimeout(serialCapture.timer);
+  const { reject } = serialCapture;
+  serialCapture = null;
+  reject(error);
+};
+
+const awaitSerialOutput = (
+  match: (buffer: string) => boolean,
+  timeoutMs: number,
+) => {
+  const port = picoSerialPort;
+  if (!port?.isOpen) {
+    return Promise.reject(new Error("Serial port is not open"));
+  }
+  if (serialCapture) {
+    return Promise.reject(new Error("Serial capture already in progress"));
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      rejectSerialCapture(new Error("Serial read timeout"));
+    }, timeoutMs);
+
+    serialCapture = {
+      buffer: "",
+      match,
+      resolve,
+      reject,
+      timer,
+    };
+  });
+};
+
+const handleSerialData = (data: Buffer) => {
+  const text = data.toString("utf-8");
+  if (serialCapture) {
+    serialCapture.buffer += text;
+    if (serialCapture.match(serialCapture.buffer)) {
+      resolveSerialCapture(serialCapture.buffer);
+    }
+    return;
+  }
+
+  sendToRenderer("pico:serial-data", text);
+};
+
+const writeToPort = async (data: string | Buffer) => {
+  const port = picoSerialPort;
+  if (!port?.isOpen) return false;
+  return await new Promise<boolean>((resolve) => {
+    port.write(data, (error) => {
+      if (error) {
+        sendToRenderer("pico:serial-error", error.message);
+        resolve(false);
+        return;
+      }
+      port.drain((drainError) => {
+        if (drainError) {
+          sendToRenderer("pico:serial-error", drainError.message);
+          resolve(false);
+          return;
+        }
+        resolve(true);
+      });
+    });
+  });
+};
+
+const sanitizeRawReplOutput = (data: string) => {
+  const eotIndex = data.indexOf(RAW_REPL_EOT);
+  const trimmed = (eotIndex >= 0 ? data.slice(0, eotIndex) : data)
+    .replace(/\r/g, "")
+    .replace(/^OK\n?/, "")
+    .trim();
+  return trimmed;
+};
+
+const runRawReplCommand = async (script: string, timeoutMs?: number) => {
+  const port = picoSerialPort;
+  if (!port?.isOpen) {
+    throw new Error("Serial port is not open");
+  }
+
+  await writeToPort(RAW_REPL_INTERRUPT + RAW_REPL_INTERRUPT);
+  await writeToPort(RAW_REPL_ENTER);
+  await awaitSerialOutput(
+    (buffer) => buffer.includes(RAW_REPL_READY_TOKEN),
+    1000,
+  ).catch(() => "");
+
+  await writeToPort(script);
+  await writeToPort(RAW_REPL_EOT);
+
+  const output = await awaitSerialOutput(
+    (buffer) => buffer.includes(RAW_REPL_EOT),
+    timeoutMs ?? RAW_REPL_DEFAULT_TIMEOUT_MS,
+  );
+
+  await writeToPort(RAW_REPL_EXIT);
+  return sanitizeRawReplOutput(output);
+};
+
+const ensurePicoSerialConnected = async () => {
+  if (picoSerialPort?.isOpen) return true;
+  const ports = await listSerialPorts();
+  const picoPorts = ports.filter(isPicoSerialPort);
+  if (picoPorts.length === 0) return false;
+  return await openPicoSerialPort(picoPorts[0].path, DEFAULT_BAUD_RATE);
+};
 
 const closePicoSerialPort = async () => {
   if (!picoSerialPort) return true;
@@ -173,13 +330,12 @@ const openPicoSerialPort = async (portPath: string, baudRate: number) => {
   port.on("open", () => {
     sendToRenderer("pico:serial-open", portPath);
   });
-  port.on("data", (data: Buffer) => {
-    sendToRenderer("pico:serial-data", data.toString("utf-8"));
-  });
+  port.on("data", handleSerialData);
   port.on("error", (error: Error) => {
     sendToRenderer("pico:serial-error", error.message);
   });
   port.on("close", () => {
+    rejectSerialCapture(new Error("Serial port closed"));
     sendToRenderer("pico:serial-close");
   });
 
@@ -225,18 +381,162 @@ const writePicoSerial = async (data: string) => {
   });
 };
 
+const picoFsList = async (picoPath: string) => {
+  const connected = await ensurePicoSerialConnected();
+  if (!connected) return [];
+
+  const devicePath = toDevicePath(picoPath);
+  const safePath = escapePyString(devicePath);
+  const script =
+    "import ujson, uos\n" +
+    "def _list(path):\n" +
+    "    result = []\n" +
+    "    try:\n" +
+    "        names = uos.listdir(path)\n" +
+    "    except Exception as e:\n" +
+    "        print('ERR:' + repr(e))\n" +
+    "        return\n" +
+    "    for name in names:\n" +
+    "        full = (path.rstrip('/') + '/' + name) if path not in ('', '/') else '/' + name\n" +
+    "        try:\n" +
+    "            mode = uos.stat(full)[0]\n" +
+    "            is_dir = (mode & 0x4000) != 0\n" +
+    "        except Exception:\n" +
+    "            is_dir = False\n" +
+    "        result.append((name, is_dir))\n" +
+    "    print(ujson.dumps(result))\n" +
+    `_list('${safePath}')\n`;
+
+  try {
+    const output = await runRawReplCommand(script, 5000);
+    if (!output || output.startsWith("ERR:")) return [];
+    const entries = JSON.parse(output) as [string, boolean][];
+    return entries.map(([name, isDirectory]) => ({
+      name,
+      isDirectory,
+      path: toPicoPath(path.posix.join(devicePath, name)),
+    }));
+  } catch (error) {
+    return [];
+  }
+};
+
+const picoReadFile = async (picoPath: string) => {
+  const connected = await ensurePicoSerialConnected();
+  if (!connected) throw new Error("Pico not connected");
+
+  const devicePath = toDevicePath(picoPath);
+  const safePath = escapePyString(devicePath);
+  const script =
+    "import ubinascii\n" +
+    `with open('${safePath}', 'rb') as f:\n` +
+    "    data = f.read()\n" +
+    "print(ubinascii.b2a_base64(data).decode().strip())\n";
+
+  const output = await runRawReplCommand(script, 5000);
+  if (!output || output.startsWith("ERR:")) {
+    throw new Error("Failed to read Pico file");
+  }
+  return Buffer.from(output.trim(), "base64").toString("utf-8");
+};
+
+const picoWriteFile = async (picoPath: string, content: string) => {
+  const connected = await ensurePicoSerialConnected();
+  if (!connected) return false;
+
+  const devicePath = toDevicePath(picoPath);
+  const safePath = escapePyString(devicePath);
+  const base64 = Buffer.from(content, "utf-8").toString("base64");
+  const chunks = base64.match(/.{1,512}/g) ?? [""];
+
+  for (let i = 0; i < chunks.length; i += 1) {
+    const mode = i === 0 ? "wb" : "ab";
+    const chunk = chunks[i];
+    const script =
+      "import ubinascii\n" +
+      `_f = open('${safePath}', '${mode}')\n` +
+      `_f.write(ubinascii.a2b_base64('${chunk}'))\n` +
+      "_f.close()\n" +
+      "print('OK')\n";
+    try {
+      const output = await runRawReplCommand(script, 5000);
+      if (!output.includes("OK")) return false;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const picoMkdir = async (picoPath: string) => {
+  const connected = await ensurePicoSerialConnected();
+  if (!connected) return false;
+
+  const devicePath = toDevicePath(picoPath);
+  const safePath = escapePyString(devicePath);
+  const script =
+    "import uos\n" + `uos.mkdir('${safePath}')\n` + "print('OK')\n";
+  try {
+    const output = await runRawReplCommand(script, 5000);
+    return output.includes("OK");
+  } catch (error) {
+    return false;
+  }
+};
+
+const picoRm = async (picoPath: string) => {
+  const connected = await ensurePicoSerialConnected();
+  if (!connected) return false;
+
+  const devicePath = toDevicePath(picoPath);
+  const safePath = escapePyString(devicePath);
+  const script =
+    "import uos\n" +
+    "def _rm(path):\n" +
+    "    try:\n" +
+    "        mode = uos.stat(path)[0]\n" +
+    "        if mode & 0x4000:\n" +
+    "            for name in uos.listdir(path):\n" +
+    "                child = (path.rstrip('/') + '/' + name) if path not in ('', '/') else '/' + name\n" +
+    "                _rm(child)\n" +
+    "            uos.rmdir(path)\n" +
+    "        else:\n" +
+    "            uos.remove(path)\n" +
+    "    except Exception as e:\n" +
+    "        print('ERR:' + repr(e))\n" +
+    "_rm('" +
+    safePath +
+    "')\n" +
+    "print('OK')\n";
+  try {
+    const output = await runRawReplCommand(script, 6000);
+    return output.includes("OK");
+  } catch (error) {
+    return false;
+  }
+};
+
 const startPicoWatcher = () => {
   if (picoWatchTimer) return;
   const poll = async () => {
     if (picoPollInFlight) return;
     picoPollInFlight = true;
     try {
-      const isConnected = await detectPicoConnection();
+      const ports = await listSerialPorts();
+      const picoPorts = ports.filter(isPicoSerialPort);
+      const serialFound = picoPorts.length > 0;
+      const bootFound = await detectPicoBootVolume();
+      const isConnected = serialFound || bootFound;
+
+      if (serialFound && !picoSerialPort?.isOpen) {
+        await openPicoSerialPort(picoPorts[0].path, DEFAULT_BAUD_RATE);
+      }
       if (isConnected !== picoConnected) {
         picoConnected = isConnected;
         sendToRenderer("pico:connection-changed", picoConnected);
       }
-      if (!isConnected && picoSerialPort?.isOpen) {
+      if (!serialFound && picoSerialPort?.isOpen) {
         await closePicoSerialPort();
       }
     } finally {
@@ -297,6 +597,9 @@ app.whenReady().then(createWindow);
 
 // IPC Handlers
 ipcMain.handle("fs:readdir", async (_, dirPath: string) => {
+  if (isPicoPath(dirPath)) {
+    return await picoFsList(dirPath);
+  }
   const absolutePath = path.isAbsolute(dirPath)
     ? dirPath
     : path.join(process.cwd(), dirPath);
@@ -309,25 +612,42 @@ ipcMain.handle("fs:readdir", async (_, dirPath: string) => {
 });
 
 ipcMain.handle("fs:readFile", async (_, filePath: string) => {
+  if (isPicoPath(filePath)) {
+    return await picoReadFile(filePath);
+  }
   return await fs.readFile(filePath, "utf-8");
 });
 
 ipcMain.handle("fs:writeFile", async (_, filePath: string, content: string) => {
+  if (isPicoPath(filePath)) {
+    return await picoWriteFile(filePath, content);
+  }
   await fs.writeFile(filePath, content, "utf-8");
   return true;
 });
 
 ipcMain.handle("fs:mkdir", async (_, dirPath: string) => {
+  if (isPicoPath(dirPath)) {
+    return await picoMkdir(dirPath);
+  }
   await fs.mkdir(dirPath, { recursive: true });
   return true;
 });
 
 ipcMain.handle("fs:rm", async (_, targetPath: string) => {
+  if (isPicoPath(targetPath)) {
+    return await picoRm(targetPath);
+  }
   await fs.rm(targetPath, { recursive: true, force: true });
   return true;
 });
 
 ipcMain.handle("path:getBasename", (_, filePath: string) => {
+  if (isPicoPath(filePath)) {
+    const devicePath = toDevicePath(filePath);
+    if (devicePath === "/") return "Pico";
+    return path.posix.basename(devicePath);
+  }
   return path.basename(filePath);
 });
 

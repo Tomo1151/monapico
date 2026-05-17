@@ -21,8 +21,13 @@ function App() {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [workspacePath, setWorkspacePath] = useState<string>("");
+  const [lastLocalWorkspacePath, setLastLocalWorkspacePath] =
+    useState<string>("");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [picoConnected, setPicoConnected] = useState(false);
+  const [picoSerialReady, setPicoSerialReady] = useState(false);
+
+  const PICO_WORKSPACE_PATH = "pico:/";
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -105,6 +110,39 @@ function App() {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const unsubOpen = window.electronAPI.onPicoSerialOpen(() => {
+      setPicoSerialReady(true);
+    });
+    const unsubClose = window.electronAPI.onPicoSerialClose(() => {
+      setPicoSerialReady(false);
+    });
+    return () => {
+      unsubOpen();
+      unsubClose();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (workspacePath && !workspacePath.startsWith("pico:")) {
+      setLastLocalWorkspacePath(workspacePath);
+    }
+  }, [workspacePath]);
+
+  useEffect(() => {
+    if (picoSerialReady) {
+      if (!workspacePath.startsWith("pico:")) {
+        setLastLocalWorkspacePath(workspacePath);
+      }
+      setWorkspacePath(PICO_WORKSPACE_PATH);
+      return;
+    }
+
+    if (workspacePath.startsWith("pico:") && lastLocalWorkspacePath) {
+      setWorkspacePath(lastLocalWorkspacePath);
+    }
+  }, [picoSerialReady]);
 
   const handleCloseTab = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
