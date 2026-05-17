@@ -4,6 +4,15 @@ export interface FileEntry {
   path: string;
 }
 
+export interface SerialPortInfo {
+  path: string;
+  manufacturer?: string;
+  serialNumber?: string;
+  vendorId?: string;
+  productId?: string;
+  pnpId?: string;
+}
+
 export interface IElectronAPI {
   readdir: (path: string) => Promise<FileEntry[]>;
   readFile: (path: string) => Promise<string>;
@@ -13,6 +22,10 @@ export interface IElectronAPI {
   getBasename: (path: string) => Promise<string>;
   getAppPath: () => Promise<string>;
   getPicoConnectionState: () => Promise<boolean>;
+  listSerialPorts: () => Promise<SerialPortInfo[]>;
+  connectPicoSerial: (path: string, baudRate?: number) => Promise<boolean>;
+  disconnectPicoSerial: () => Promise<boolean>;
+  writePicoSerial: (data: string) => Promise<boolean>;
   showSaveDialog: (defaultPath?: string) => Promise<string | null>;
   showOpenDialog: () => Promise<string | null>;
   showExplorerContextMenu: (
@@ -33,6 +46,10 @@ export interface IElectronAPI {
   onPicoConnectionChange: (
     callback: (isConnected: boolean) => void,
   ) => () => void;
+  onPicoSerialData: (callback: (data: string) => void) => () => void;
+  onPicoSerialError: (callback: (message: string) => void) => () => void;
+  onPicoSerialOpen: (callback: (path: string) => void) => () => void;
+  onPicoSerialClose: (callback: () => void) => () => void;
 }
 
 declare global {

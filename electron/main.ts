@@ -2,6 +2,9 @@ import { app, BrowserWindow, ipcMain, dialog, Menu } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { SerialPort } from "serialport";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,67 +22,229 @@ process.env.VITE_PUBLIC = app.isPackaged
   ? process.env.DIST
   : path.join(process.env.DIST, "../public");
 
+const execFileAsync = promisify(execFile);
+
 let win: BrowserWindow | null;
 let picoConnected = false;
 let picoWatchTimer: NodeJS.Timeout | null = null;
+let picoPollInFlight = false;
+let picoSerialPort: SerialPort | null = null;
+let picoSerialPath: string | null = null;
 
-const PICO_DEVICE_PATTERNS = {
-  darwin: [
-    /^tty\.usbmodem/i,
-    /^cu\.usbmodem/i,
-    /^tty\.usbserial/i,
-    /^cu\.usbserial/i,
-  ],
-  linux: [/^ttyACM\d+$/i, /^ttyUSB\d+$/i],
+type DetectedPortInfo = Awaited<ReturnType<typeof SerialPort.list>>[number];
+
+const PICO_USB_VID = "2E8A";
+const PICO_VOLUME_LABEL = "RPI-RP2";
+const DEFAULT_BAUD_RATE = 115200;
+const PICO_WATCH_INTERVAL_MS = process.platform === "win32" ? 2000 : 1000;
+
+const runPowerShell = async (command: string) => {
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-Command", command],
+      { windowsHide: true },
+    );
+    return stdout.trim();
+  } catch (error) {
+    return "";
+  }
 };
 
-const hasMatchingDevice = (entries: string[], patterns: RegExp[]) => {
-  return entries.some((name) => patterns.some((pattern) => pattern.test(name)));
-};
-
-const detectPicoConnection = async () => {
-  if (process.platform === "darwin") {
-    try {
-      const devEntries = await fs.readdir("/dev");
-      const volumeEntries = await fs
-        .readdir("/Volumes")
+const hasLinuxMountWithLabel = async (label: string) => {
+  const target = label.toLowerCase();
+  const roots = ["/media", "/run/media"];
+  for (const root of roots) {
+    const entries = await fs.readdir(root).catch(() => [] as string[]);
+    for (const entry of entries) {
+      if (entry.toLowerCase() === target) return true;
+      const nested = await fs
+        .readdir(path.join(root, entry))
         .catch(() => [] as string[]);
-      const serialFound = hasMatchingDevice(
-        devEntries,
-        PICO_DEVICE_PATTERNS.darwin,
-      );
-      const volumeFound = volumeEntries.some(
-        (name) => name.toLowerCase() === "rpi-rp2",
-      );
-      return serialFound || volumeFound;
-    } catch (error) {
-      return false;
+      if (nested.some((name) => name.toLowerCase() === target)) return true;
     }
   }
+  return false;
+};
 
-  if (process.platform === "linux") {
-    try {
-      const devEntries = await fs.readdir("/dev");
-      return hasMatchingDevice(devEntries, PICO_DEVICE_PATTERNS.linux);
-    } catch (error) {
-      return false;
-    }
+const isPicoSerialPort = (port: DetectedPortInfo) => {
+  const vendorId = port.vendorId?.toLowerCase();
+  if (vendorId === PICO_USB_VID.toLowerCase()) return true;
+
+  const pnpId = port.pnpId?.toLowerCase() ?? "";
+  if (pnpId.includes(`vid_${PICO_USB_VID.toLowerCase()}`)) return true;
+
+  const manufacturer = (port.manufacturer ?? "").toLowerCase();
+  if (manufacturer.includes("raspberry")) {
+    return true;
   }
 
   return false;
 };
 
+const listSerialPorts = async () => {
+  try {
+    return await SerialPort.list();
+  } catch (error) {
+    return [] as DetectedPortInfo[];
+  }
+};
+
+const detectPicoSerialConnection = async () => {
+  const ports = await listSerialPorts();
+  return ports.some(isPicoSerialPort);
+};
+
+const detectPicoBootVolume = async () => {
+  if (process.platform === "darwin") {
+    const volumeEntries = await fs
+      .readdir("/Volumes")
+      .catch(() => [] as string[]);
+    return volumeEntries.some(
+      (name) => name.toLowerCase() === PICO_VOLUME_LABEL.toLowerCase(),
+    );
+  }
+
+  if (process.platform === "linux") {
+    return await hasLinuxMountWithLabel(PICO_VOLUME_LABEL);
+  }
+
+  if (process.platform === "win32") {
+    const volumeOutput = await runPowerShell(
+      `Get-CimInstance Win32_LogicalDisk | Where-Object { $_.VolumeName -eq '${PICO_VOLUME_LABEL}' } | Select-Object -First 1 -ExpandProperty DeviceID`,
+    );
+    return volumeOutput.length > 0;
+  }
+
+  return false;
+};
+
+const detectPicoConnection = async () => {
+  const serialFound = await detectPicoSerialConnection();
+  if (serialFound) return true;
+  return await detectPicoBootVolume();
+};
+
+const sendToRenderer = (channel: string, ...args: unknown[]) => {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send(channel, ...args);
+};
+
+const serializePortInfo = (port: DetectedPortInfo) => ({
+  path: port.path,
+  manufacturer: port.manufacturer,
+  serialNumber: port.serialNumber,
+  vendorId: port.vendorId,
+  productId: port.productId,
+  pnpId: port.pnpId,
+});
+
+const closePicoSerialPort = async () => {
+  if (!picoSerialPort) return true;
+  const port = picoSerialPort;
+  const closed = await new Promise<boolean>((resolve) => {
+    port.close((error) => {
+      if (error) {
+        sendToRenderer("pico:serial-error", error.message);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
+  port.removeAllListeners();
+  picoSerialPort = null;
+  picoSerialPath = null;
+  return closed;
+};
+
+const openPicoSerialPort = async (portPath: string, baudRate: number) => {
+  if (picoSerialPort?.isOpen && picoSerialPath === portPath) {
+    return true;
+  }
+  if (picoSerialPort) {
+    await closePicoSerialPort();
+  }
+
+  const port = new SerialPort({ path: portPath, baudRate, autoOpen: false });
+  picoSerialPort = port;
+  picoSerialPath = portPath;
+
+  port.on("open", () => {
+    sendToRenderer("pico:serial-open", portPath);
+  });
+  port.on("data", (data: Buffer) => {
+    sendToRenderer("pico:serial-data", data.toString("utf-8"));
+  });
+  port.on("error", (error: Error) => {
+    sendToRenderer("pico:serial-error", error.message);
+  });
+  port.on("close", () => {
+    sendToRenderer("pico:serial-close");
+  });
+
+  const opened = await new Promise<boolean>((resolve) => {
+    port.open((error) => {
+      if (error) {
+        sendToRenderer("pico:serial-error", error.message);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
+
+  if (!opened) {
+    port.removeAllListeners();
+    picoSerialPort = null;
+    picoSerialPath = null;
+  }
+
+  return opened;
+};
+
+const writePicoSerial = async (data: string) => {
+  const port = picoSerialPort;
+  if (!port?.isOpen) return false;
+  return await new Promise<boolean>((resolve) => {
+    port.write(data, "utf-8", (error) => {
+      if (error) {
+        sendToRenderer("pico:serial-error", error.message);
+        resolve(false);
+        return;
+      }
+      port.drain((drainError) => {
+        if (drainError) {
+          sendToRenderer("pico:serial-error", drainError.message);
+          resolve(false);
+          return;
+        }
+        resolve(true);
+      });
+    });
+  });
+};
+
 const startPicoWatcher = () => {
   if (picoWatchTimer) return;
   const poll = async () => {
-    const isConnected = await detectPicoConnection();
-    if (isConnected !== picoConnected) {
-      picoConnected = isConnected;
-      win?.webContents.send("pico:connection-changed", picoConnected);
+    if (picoPollInFlight) return;
+    picoPollInFlight = true;
+    try {
+      const isConnected = await detectPicoConnection();
+      if (isConnected !== picoConnected) {
+        picoConnected = isConnected;
+        sendToRenderer("pico:connection-changed", picoConnected);
+      }
+      if (!isConnected && picoSerialPort?.isOpen) {
+        await closePicoSerialPort();
+      }
+    } finally {
+      picoPollInFlight = false;
     }
   };
   poll();
-  picoWatchTimer = setInterval(poll, 1000);
+  picoWatchTimer = setInterval(poll, PICO_WATCH_INTERVAL_MS);
 };
 
 const stopPicoWatcher = () => {
@@ -115,6 +280,7 @@ function createWindow() {
 
 app.on("window-all-closed", () => {
   stopPicoWatcher();
+  void closePicoSerialPort();
   if (process.platform !== "darwin") {
     app.quit();
     win = null;
@@ -173,6 +339,26 @@ ipcMain.handle("pico:get-connection-state", async () => {
   const isConnected = await detectPicoConnection();
   picoConnected = isConnected;
   return isConnected;
+});
+
+ipcMain.handle("serial:list", async () => {
+  const ports = await listSerialPorts();
+  return ports.map(serializePortInfo);
+});
+
+ipcMain.handle(
+  "pico:serial-connect",
+  async (_, portPath: string, baudRate?: number) => {
+    return await openPicoSerialPort(portPath, baudRate ?? DEFAULT_BAUD_RATE);
+  },
+);
+
+ipcMain.handle("pico:serial-disconnect", async () => {
+  return await closePicoSerialPort();
+});
+
+ipcMain.handle("pico:serial-write", async (_, data: string) => {
+  return await writePicoSerial(data);
 });
 
 ipcMain.handle("dialog:showSaveDialog", async (_, defaultDir?: string) => {
