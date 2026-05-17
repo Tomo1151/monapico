@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileTree } from './components/FileTree';
 import { Editor } from './components/Editor';
-import { X } from 'lucide-react';
+import { X, Plus } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -25,25 +25,18 @@ function App() {
 
   const activeTab = tabs.find(t => t.id === activeTabId) || null;
 
-  // Initialize workspace and a blank tab
-  useEffect(() => {
-    const init = async () => {
-      const path = await window.electronAPI.getAppPath();
-      setWorkspacePath(path);
-      
-      const untitledId = `untitled-${Date.now()}`;
-      const newTab: Tab = {
-        id: untitledId,
-        path: null,
-        name: 'Untitled',
-        content: '',
-        isDirty: false
-      };
-      setTabs([newTab]);
-      setActiveTabId(untitledId);
+  const createNewUntitledTab = () => {
+    const untitledId = `untitled-${Date.now()}`;
+    const newTab: Tab = {
+      id: untitledId,
+      path: null,
+      name: 'Untitled',
+      content: '',
+      isDirty: false
     };
-    init();
-  }, []);
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(untitledId);
+  };
 
   const handleFileSelect = async (path: string) => {
     // Check if file is already open
@@ -70,6 +63,26 @@ function App() {
       alert('Failed to read file');
     }
   };
+
+  // Initialize workspace and a blank tab
+  useEffect(() => {
+    const init = async () => {
+      const path = await window.electronAPI.getAppPath();
+      setWorkspacePath(path);
+      
+      const untitledId = `untitled-${Date.now()}`;
+      const newTab: Tab = {
+        id: untitledId,
+        path: null,
+        name: 'Untitled',
+        content: '',
+        isDirty: false
+      };
+      setTabs([newTab]);
+      setActiveTabId(untitledId);
+    };
+    init();
+  }, []);
 
   const handleCloseTab = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -137,27 +150,36 @@ function App() {
       </aside>
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Tab Bar */}
-        <div className="h-9 bg-[#252526] flex overflow-x-auto no-scrollbar border-b border-[#1e1e1e]">
-          {tabs.map(tab => (
-            <div
-              key={tab.id}
-              onClick={() => setActiveTabId(tab.id)}
-              className={cn(
-                "flex items-center px-3 min-w-[120px] max-w-[200px] h-full cursor-pointer border-r border-[#1e1e1e] select-none text-xs transition-colors",
-                activeTabId === tab.id ? "bg-[#1e1e1e] text-white" : "bg-[#2d2d2d] text-[#969696] hover:bg-[#2a2d2e]"
-              )}
-            >
-              <span className={cn("truncate flex-1", tab.isDirty && "font-bold italic")}>
-                {tab.name}{tab.isDirty && '*'}
-              </span>
-              <button
-                onClick={(e) => handleCloseTab(e, tab.id)}
-                className="ml-2 p-0.5 hover:bg-[#37373d] rounded text-[#969696] hover:text-white"
+        <div className="h-9 bg-[#252526] flex items-center overflow-hidden border-b border-[#1e1e1e]">
+          <div className="flex-1 flex overflow-x-auto no-scrollbar h-full">
+            {tabs.map(tab => (
+              <div
+                key={tab.id}
+                onClick={() => setActiveTabId(tab.id)}
+                className={cn(
+                  "flex items-center px-3 min-w-[120px] max-w-[200px] h-full cursor-pointer border-r border-[#1e1e1e] select-none text-xs transition-colors",
+                  activeTabId === tab.id ? "bg-[#1e1e1e] text-white" : "bg-[#2d2d2d] text-[#969696] hover:bg-[#2a2d2e]"
+                )}
               >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
+                <span className={cn("truncate flex-1", tab.isDirty && "font-bold italic")}>
+                  {tab.name}{tab.isDirty && '*'}
+                </span>
+                <button
+                  onClick={(e) => handleCloseTab(e, tab.id)}
+                  className="ml-2 p-0.5 hover:bg-[#37373d] rounded text-[#969696] hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button 
+            onClick={createNewUntitledTab}
+            className="px-3 h-full flex items-center justify-center text-[#969696] hover:text-white hover:bg-[#2d2d2d] border-l border-[#1e1e1e] transition-colors"
+            title="New Untitled File"
+          >
+            <Plus size={16} />
+          </button>
         </div>
         
         <div className="flex-1 overflow-hidden">

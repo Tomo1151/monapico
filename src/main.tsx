@@ -10,6 +10,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 )
 
 // Use contextBridge
-window.electronAPI.onMainMessage((_message) => {
+const unsub = window.electronAPI.onMainMessage((_message) => {
   console.log(_message)
 })
+
+// Note: In a real app, you might want to call unsub() when the root is unmounted
+// but for the main entry point, it's usually fine.

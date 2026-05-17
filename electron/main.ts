@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -79,6 +79,16 @@ ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
   return true
 })
 
+ipcMain.handle('fs:mkdir', async (_, dirPath: string) => {
+  await fs.mkdir(dirPath, { recursive: true })
+  return true
+})
+
+ipcMain.handle('fs:rm', async (_, targetPath: string) => {
+  await fs.rm(targetPath, { recursive: true, force: true })
+  return true
+})
+
 ipcMain.handle('path:getBasename', (_, filePath: string) => {
   return path.basename(filePath)
 })
@@ -110,4 +120,36 @@ ipcMain.handle('dialog:showOpenDialog', async () => {
   console.log('IPC: dialog:showOpenDialog result:', { canceled, filePaths })
   if (canceled) return null
   return filePaths[0]
+})
+
+ipcMain.on('explorer:showContextMenu', (event, path: string, isDirectory: boolean, canDelete: boolean = true) => {
+  const template: any[] = [
+    {
+      label: '新しいファイルを作成',
+      click: () => {
+        event.sender.send('explorer:create-new-file', { path, isDirectory })
+      }
+    },
+    {
+      label: '新しいフォルダを作成',
+      click: () => {
+        event.sender.send('explorer:create-new-folder', { path, isDirectory })
+      }
+    }
+  ]
+
+  if (canDelete) {
+    template.push({ type: 'separator' })
+    template.push({
+      label: '削除',
+      click: () => {
+        event.sender.send('explorer:delete-item', { path, isDirectory })
+      }
+    })
+  }
+
+  const menu = Menu.buildFromTemplate(template)
+  menu.popup({
+    window: BrowserWindow.fromWebContents(event.sender)!
+  })
 })

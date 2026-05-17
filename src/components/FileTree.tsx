@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Folder, File, ChevronRight, ChevronDown } from 'lucide-react';
+import { Folder, File, ChevronRight, ChevronDown, FolderPlus } from 'lucide-react';
 import { FileEntry } from '../electron-api';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -25,6 +25,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 }) => {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [workspaceName, setWorkspaceName] = useState<string>('');
+  const [newInput, setNewInput] = useState<{ parentPath: string; level: number; isDirectory: boolean } | null>(null);
 
   const loadRoot = async () => {
     if (!workspacePath) return;
@@ -46,33 +47,95 @@ export const FileTree: React.FC<FileTreeProps> = ({
     loadRoot();
   }, [workspacePath, refreshTrigger]);
 
+  useEffect(() => {
+    const handleCreateNew = (data: { path: string; isDirectory: boolean }, isCreatingDirectory: boolean) => {
+      let parentPath = data.path;
+      if (!data.isDirectory) {
+        parentPath = data.path.substring(0, Math.max(data.path.lastIndexOf('/'), data.path.lastIndexOf('\\')));
+      }
+      
+      const relPath = parentPath.replace(workspacePath, '');
+      const level = relPath.split(/[\/\\]/).filter(Boolean).length;
+
+      setNewInput({ parentPath, level, isDirectory: isCreatingDirectory });
+    };
+
+    const unsubNewFile = window.electronAPI.onCreateNewFile((data) => handleCreateNew(data, false));
+    const unsubNewFolder = window.electronAPI.onCreateNewFolder((data) => handleCreateNew(data, true));
+    
+    const unsubDelete = window.electronAPI.onDeleteItem(async (data) => {
+      const name = await window.electronAPI.getBasename(data.path);
+      if (window.confirm(`本当に「${name}」を削除しますか？`)) {
+        try {
+          await window.electronAPI.rm(data.path);
+          loadRoot();
+        } catch (error) {
+          alert('削除に失敗しました');
+        }
+      }
+    });
+
+    return () => {
+      unsubNewFile();
+      unsubNewFolder();
+      unsubDelete();
+    };
+  }, [workspacePath]);
+
+  const handleInputSubmit = async (name: string) => {
+    if (!name || !newInput) {
+      setNewInput(null);
+      return;
+    }
+
+    const fullPath = `${newInput.parentPath}/${name}`.replace(/\/\//g, '/');
+    try {
+      if (newInput.isDirectory) {
+        await window.electronAPI.mkdir(fullPath);
+      } else {
+        await window.electronAPI.writeFile(fullPath, '');
+      }
+      setNewInput(null);
+      await loadRoot();
+      if (!newInput.isDirectory) {
+        onFileSelect(fullPath);
+      }
+    } catch (error) {
+      alert(newInput.isDirectory ? 'フォルダの作成に失敗しました' : 'ファイルの作成に失敗しました');
+      setNewInput(null);
+    }
+  };
+
   const handleOpenFolder = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    console.log('Renderer: Requesting open folder dialog');
     try {
-      if (!window.electronAPI || !window.electronAPI.showOpenDialog) {
-        throw new Error('electronAPI.showOpenDialog is not available');
-      }
       const path = await window.electronAPI.showOpenDialog();
-      console.log('Renderer: Open folder dialog result:', path);
       if (path) {
         onWorkspaceChange(path);
       }
     } catch (error: any) {
-      console.error('Renderer: Failed to open folder dialog:', error);
       alert('Failed to open folder dialog: ' + (error.message || 'Unknown error'));
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    window.electronAPI.showExplorerContextMenu(workspacePath, true, false); // canDelete: false for workspace root
+  };
+
   return (
-    <div className="h-full bg-[#252526] text-[#cccccc] flex flex-col overflow-hidden">
+    <div 
+      className="h-full bg-[#252526] text-[#cccccc] flex flex-col overflow-hidden"
+      onContextMenu={handleContextMenu}
+    >
       <div className="p-2 text-[10px] font-bold uppercase tracking-wider text-[#969696] flex justify-between items-center border-b border-[#333333]">
         <span>Explorer</span>
         <button 
           onClick={handleOpenFolder}
           className="hover:bg-[#37373d] p-1 rounded transition-colors"
           title="Open Folder"
+          onContextMenu={(e) => e.stopPropagation()}
         >
           <Folder size={14} />
         </button>
@@ -84,7 +147,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         </div>
       )}
       <div className="flex-1 overflow-y-auto py-1">
-        {files.length === 0 && (
+        {files.length === 0 && !newInput && (
           <div className="p-4 text-xs text-center text-[#666666]">
             No folder opened
           </div>
@@ -96,8 +159,18 @@ export const FileTree: React.FC<FileTreeProps> = ({
             level={0}
             onFileSelect={onFileSelect}
             selectedFilePath={selectedFilePath}
+            newInput={newInput}
+            onInputSubmit={handleInputSubmit}
           />
         ))}
+        {newInput && newInput.parentPath === workspacePath && (
+          <NewInputItem 
+            level={0} 
+            isDirectory={newInput.isDirectory}
+            onSubmit={handleInputSubmit} 
+            onCancel={() => setNewInput(null)} 
+          />
+        )}
       </div>
     </div>
   );
@@ -108,28 +181,50 @@ interface FileItemProps {
   level: number;
   onFileSelect: (path: string) => void;
   selectedFilePath: string | null;
+  newInput: { parentPath: string; level: number; isDirectory: boolean } | null;
+  onInputSubmit: (name: string) => void;
 }
 
-const FileItem: React.FC<FileItemProps> = ({ file, level, onFileSelect, selectedFilePath }) => {
+const FileItem: React.FC<FileItemProps> = ({ 
+  file, 
+  level, 
+  onFileSelect, 
+  selectedFilePath, 
+  newInput, 
+  onInputSubmit 
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [children, setChildren] = useState<FileEntry[]>([]);
   const isSelected = selectedFilePath === file.path;
 
+  const loadChildren = async () => {
+    const entries = await window.electronAPI.readdir(file.path);
+    setChildren(entries.sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      return a.name.localeCompare(b.name);
+    }));
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      loadChildren();
+    }
+  }, [isOpen]);
+
   const toggleFolder = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (file.isDirectory) {
-      if (!isOpen) {
-        const entries = await window.electronAPI.readdir(file.path);
-        setChildren(entries.sort((a, b) => {
-          if (a.isDirectory && !b.isDirectory) return -1;
-          if (!a.isDirectory && b.isDirectory) return 1;
-          return a.name.localeCompare(b.name);
-        }));
-      }
       setIsOpen(!isOpen);
     } else {
       onFileSelect(file.path);
     }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.electronAPI.showExplorerContextMenu(file.path, file.isDirectory);
   };
 
   return (
@@ -142,6 +237,7 @@ const FileItem: React.FC<FileItemProps> = ({ file, level, onFileSelect, selected
         )}
         style={{ paddingLeft: `${(level + 1) * 12}px` }}
         onClick={toggleFolder}
+        onContextMenu={handleContextMenu}
       >
         <span className="mr-1.5 flex-shrink-0">
           {file.isDirectory ? (
@@ -161,10 +257,58 @@ const FileItem: React.FC<FileItemProps> = ({ file, level, onFileSelect, selected
               level={level + 1}
               onFileSelect={onFileSelect}
               selectedFilePath={selectedFilePath}
+              newInput={newInput}
+              onInputSubmit={onInputSubmit}
             />
           ))}
+          {newInput && newInput.parentPath === file.path && (
+            <NewInputItem 
+              level={level + 1} 
+              isDirectory={newInput.isDirectory}
+              onSubmit={onInputSubmit} 
+              onCancel={() => onInputSubmit('')} 
+            />
+          )}
         </div>
       )}
+    </div>
+  );
+};
+
+const NewInputItem: React.FC<{ level: number, isDirectory: boolean, onSubmit: (name: string) => void, onCancel: () => void }> = ({ level, isDirectory, onSubmit, onCancel }) => {
+  const [value, setValue] = useState('');
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      onSubmit(value);
+    } else if (e.key === 'Escape') {
+      onCancel();
+    }
+  };
+
+  return (
+    <div 
+      className="flex items-center py-0.5 px-2 bg-[#37373d]" 
+      style={{ paddingLeft: `${(level + 1) * 12}px` }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span className="mr-1.5 flex-shrink-0">
+        {isDirectory ? <Folder size={16} className="text-[#dcb67a]" /> : <File size={16} className="text-[#519aba]" />}
+      </span>
+      <input
+        ref={inputRef}
+        type="text"
+        className="bg-[#3c3c3c] text-white text-sm outline-none border border-[#007acc] w-full px-1 py-0"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={() => onSubmit(value)}
+      />
     </div>
   );
 };
