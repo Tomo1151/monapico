@@ -8,6 +8,7 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   rm: (path) => electron.ipcRenderer.invoke("fs:rm", path),
   getBasename: (path) => electron.ipcRenderer.invoke("path:getBasename", path),
   getAppPath: () => electron.ipcRenderer.invoke("app:getAppPath"),
+  getPicoConnectionState: () => electron.ipcRenderer.invoke("pico:get-connection-state"),
   showSaveDialog: (defaultPath) => electron.ipcRenderer.invoke("dialog:showSaveDialog", defaultPath),
   showOpenDialog: () => electron.ipcRenderer.invoke("dialog:showOpenDialog"),
   showExplorerContextMenu: (path, isDirectory, canDelete = true) => electron.ipcRenderer.send("explorer:showContextMenu", path, isDirectory, canDelete),
@@ -30,6 +31,13 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
     electron.ipcRenderer.on("explorer:delete-item", listener);
     return () => {
       electron.ipcRenderer.removeListener("explorer:delete-item", listener);
+    };
+  },
+  onPicoConnectionChange: (callback) => {
+    const listener = (_event, isConnected) => callback(isConnected);
+    electron.ipcRenderer.on("pico:connection-changed", listener);
+    return () => {
+      electron.ipcRenderer.removeListener("pico:connection-changed", listener);
     };
   },
   onMainMessage: (callback) => {

@@ -6,6 +6,64 @@ const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 process.env.DIST = path.join(__dirname$1, "../dist");
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, "../public");
 let win;
+let picoConnected = false;
+let picoWatchTimer = null;
+const PICO_DEVICE_PATTERNS = {
+  darwin: [
+    /^tty\.usbmodem/i,
+    /^cu\.usbmodem/i,
+    /^tty\.usbserial/i,
+    /^cu\.usbserial/i
+  ],
+  linux: [/^ttyACM\d+$/i, /^ttyUSB\d+$/i]
+};
+const hasMatchingDevice = (entries, patterns) => {
+  return entries.some((name) => patterns.some((pattern) => pattern.test(name)));
+};
+const detectPicoConnection = async () => {
+  if (process.platform === "darwin") {
+    try {
+      const devEntries = await fs.readdir("/dev");
+      const volumeEntries = await fs.readdir("/Volumes").catch(() => []);
+      const serialFound = hasMatchingDevice(
+        devEntries,
+        PICO_DEVICE_PATTERNS.darwin
+      );
+      const volumeFound = volumeEntries.some(
+        (name) => name.toLowerCase() === "rpi-rp2"
+      );
+      return serialFound || volumeFound;
+    } catch (error) {
+      return false;
+    }
+  }
+  if (process.platform === "linux") {
+    try {
+      const devEntries = await fs.readdir("/dev");
+      return hasMatchingDevice(devEntries, PICO_DEVICE_PATTERNS.linux);
+    } catch (error) {
+      return false;
+    }
+  }
+  return false;
+};
+const startPicoWatcher = () => {
+  if (picoWatchTimer) return;
+  const poll = async () => {
+    const isConnected = await detectPicoConnection();
+    if (isConnected !== picoConnected) {
+      picoConnected = isConnected;
+      win == null ? void 0 : win.webContents.send("pico:connection-changed", picoConnected);
+    }
+  };
+  poll();
+  picoWatchTimer = setInterval(poll, 1e3);
+};
+const stopPicoWatcher = () => {
+  if (!picoWatchTimer) return;
+  clearInterval(picoWatchTimer);
+  picoWatchTimer = null;
+};
 function createWindow() {
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
@@ -18,6 +76,7 @@ function createWindow() {
   });
   win.webContents.on("did-finish-load", () => {
     win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+    startPicoWatcher();
   });
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -26,6 +85,7 @@ function createWindow() {
   }
 }
 app.on("window-all-closed", () => {
+  stopPicoWatcher();
   if (process.platform !== "darwin") {
     app.quit();
     win = null;
@@ -66,6 +126,11 @@ ipcMain.handle("path:getBasename", (_, filePath) => {
 });
 ipcMain.handle("app:getAppPath", () => {
   return process.cwd();
+});
+ipcMain.handle("pico:get-connection-state", async () => {
+  const isConnected = await detectPicoConnection();
+  picoConnected = isConnected;
+  return isConnected;
 });
 ipcMain.handle("dialog:showSaveDialog", async (_, defaultDir) => {
   console.log("IPC: dialog:showSaveDialog called with defaultDir:", defaultDir);

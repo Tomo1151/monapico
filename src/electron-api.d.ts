@@ -12,13 +12,27 @@ export interface IElectronAPI {
   rm: (path: string) => Promise<boolean>;
   getBasename: (path: string) => Promise<string>;
   getAppPath: () => Promise<string>;
+  getPicoConnectionState: () => Promise<boolean>;
   showSaveDialog: (defaultPath?: string) => Promise<string | null>;
   showOpenDialog: () => Promise<string | null>;
-  showExplorerContextMenu: (path: string, isDirectory: boolean, canDelete?: boolean) => void;
-  onCreateNewFile: (callback: (data: { path: string, isDirectory: boolean }) => void) => (() => void);
-  onCreateNewFolder: (callback: (data: { path: string, isDirectory: boolean }) => void) => (() => void);
-  onDeleteItem: (callback: (data: { path: string, isDirectory: boolean }) => void) => (() => void);
-  onMainMessage: (callback: (message: string) => void) => (() => void);
+  showExplorerContextMenu: (
+    path: string,
+    isDirectory: boolean,
+    canDelete?: boolean,
+  ) => void;
+  onCreateNewFile: (
+    callback: (data: { path: string; isDirectory: boolean }) => void,
+  ) => () => void;
+  onCreateNewFolder: (
+    callback: (data: { path: string; isDirectory: boolean }) => void,
+  ) => () => void;
+  onDeleteItem: (
+    callback: (data: { path: string; isDirectory: boolean }) => void,
+  ) => () => void;
+  onMainMessage: (callback: (message: string) => void) => () => void;
+  onPicoConnectionChange: (
+    callback: (isConnected: boolean) => void,
+  ) => () => void;
 }
 
 declare global {

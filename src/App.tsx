@@ -22,6 +22,7 @@ function App() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [workspacePath, setWorkspacePath] = useState<string>("");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [picoConnected, setPicoConnected] = useState(false);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -82,6 +83,27 @@ function App() {
       setActiveTabId(untitledId);
     };
     init();
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    window.electronAPI
+      .getPicoConnectionState()
+      .then((isConnected) => {
+        if (isActive) setPicoConnected(isConnected);
+      })
+      .catch(() => {});
+
+    const unsubscribe = window.electronAPI.onPicoConnectionChange(
+      (isConnected) => {
+        if (isActive) setPicoConnected(isConnected);
+      },
+    );
+    return () => {
+      isActive = false;
+      unsubscribe();
+    };
   }, []);
 
   const handleCloseTab = (e: React.MouseEvent, id: string) => {
@@ -146,7 +168,7 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-app">
+    <div className="flex h-screen w-screen overflow-hidden bg-app relative">
       <aside className="w-64 border-r border-border flex-shrink-0">
         <FileTree
           onFileSelect={handleFileSelect}
@@ -213,6 +235,23 @@ function App() {
           )}
         </div>
       </main>
+      <div
+        className="absolute bottom-3 right-3 flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-1.5 text-xs shadow-lg pointer-events-none"
+        role="status"
+        aria-live="polite"
+      >
+        <span
+          className={cn(
+            "h-2.5 w-2.5 rounded-full",
+            picoConnected
+              ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.9)]"
+              : "bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.9)]",
+          )}
+        />
+        <span className={picoConnected ? "text-emerald-400" : "text-rose-400"}>
+          Pico {picoConnected ? "Connected" : "Disconnected"}
+        </span>
+      </div>
     </div>
   );
 }
