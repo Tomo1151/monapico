@@ -284,6 +284,11 @@ const NewInputItem: React.FC<{ level: number, isDirectory: boolean, onSubmit: (n
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Check if the user is currently composing text (IME)
+    if (e.nativeEvent.isComposing) {
+      return;
+    }
+
     if (e.key === 'Enter') {
       onSubmit(value);
     } else if (e.key === 'Escape') {
