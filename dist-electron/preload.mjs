@@ -6,7 +6,8 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   writeFile: (path, content) => electron.ipcRenderer.invoke("fs:writeFile", path, content),
   getBasename: (path) => electron.ipcRenderer.invoke("path:getBasename", path),
   getAppPath: () => electron.ipcRenderer.invoke("app:getAppPath"),
-  showSaveDialog: () => electron.ipcRenderer.invoke("dialog:showSaveDialog"),
+  showSaveDialog: (defaultPath) => electron.ipcRenderer.invoke("dialog:showSaveDialog", defaultPath),
+  showOpenDialog: () => electron.ipcRenderer.invoke("dialog:showOpenDialog"),
   onMainMessage: (callback) => {
     electron.ipcRenderer.on("main-process-message", (_event, message) => callback(message));
   }

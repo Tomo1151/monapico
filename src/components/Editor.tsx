@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import MonacoEditor from '@monaco-editor/react';
 import { File } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -17,12 +17,18 @@ interface EditorProps {
 
 export const Editor: React.FC<EditorProps> = ({ filePath, content, onChange, onSave }) => {
   const language = filePath?.endsWith('.py') ? 'python' : 'python'; // Default to python for MicroPython focus
+  const onSaveRef = React.useRef(onSave);
+  
+  // Update the ref on every render to ensure we have the latest callback
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
 
   const handleEditorDidMount = (editor: any, monaco: any) => {
     editor.addCommand(
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
       () => {
-        onSave();
+        onSaveRef.current();
       }
     );
   };

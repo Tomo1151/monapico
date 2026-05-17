@@ -1,59 +1,123 @@
 import React, { useState, useEffect } from 'react';
 import { FileTree } from './components/FileTree';
 import { Editor } from './components/Editor';
+import { X } from 'lucide-react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+interface Tab {
+  id: string; // File path or 'untitled-X'
+  path: string | null;
+  name: string;
+  content: string;
+  isDirty: boolean;
+}
 
 function App() {
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState<string>('');
-  const [isDirty, setIsDirty] = useState(false);
-
+  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [workspacePath, setWorkspacePath] = useState<string>('');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Load a blank file on startup
+  const activeTab = tabs.find(t => t.id === activeTabId) || null;
+
+  // Initialize workspace and a blank tab
   useEffect(() => {
-    setSelectedFilePath(null);
-    setFileContent('');
-    setIsDirty(false);
+    const init = async () => {
+      const path = await window.electronAPI.getAppPath();
+      setWorkspacePath(path);
+      
+      const untitledId = `untitled-${Date.now()}`;
+      const newTab: Tab = {
+        id: untitledId,
+        path: null,
+        name: 'Untitled',
+        content: '',
+        isDirty: false
+      };
+      setTabs([newTab]);
+      setActiveTabId(untitledId);
+    };
+    init();
   }, []);
 
   const handleFileSelect = async (path: string) => {
-    if (isDirty) {
-      const confirm = window.confirm('You have unsaved changes. Do you want to discard them?');
-      if (!confirm) return;
+    // Check if file is already open
+    const existingTab = tabs.find(t => t.path === path);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      return;
     }
-    
+
     try {
       const content = await window.electronAPI.readFile(path);
-      setSelectedFilePath(path);
-      setFileContent(content);
-      setIsDirty(false);
+      const name = await window.electronAPI.getBasename(path);
+      const newTab: Tab = {
+        id: path,
+        path,
+        name,
+        content,
+        isDirty: false
+      };
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(path);
     } catch (error) {
       console.error('Failed to read file:', error);
       alert('Failed to read file');
     }
   };
 
+  const handleCloseTab = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const tabToClose = tabs.find(t => t.id === id);
+    if (tabToClose?.isDirty) {
+      if (!window.confirm(`${tabToClose.name} has unsaved changes. Close anyway?`)) {
+        return;
+      }
+    }
+
+    const newTabs = tabs.filter(t => t.id !== id);
+    setTabs(newTabs);
+
+    if (activeTabId === id) {
+      if (newTabs.length > 0) {
+        setActiveTabId(newTabs[newTabs.length - 1].id);
+      } else {
+        setActiveTabId(null);
+      }
+    }
+  };
+
   const handleContentChange = (value: string | undefined) => {
-    if (value !== undefined) {
-      setFileContent(value);
-      setIsDirty(true);
+    if (value !== undefined && activeTabId) {
+      setTabs(prev => prev.map(t => 
+        t.id === activeTabId ? { ...t, content: value, isDirty: true } : t
+      ));
     }
   };
 
   const handleSave = async () => {
-    let targetPath = selectedFilePath;
-    
+    if (!activeTab) return;
+
+    let targetPath = activeTab.path;
     if (!targetPath) {
-      targetPath = await window.electronAPI.showSaveDialog();
-      if (!targetPath) return; // User canceled
+      targetPath = await window.electronAPI.showSaveDialog(workspacePath);
+      if (!targetPath) return;
     }
 
     try {
-      await window.electronAPI.writeFile(targetPath, fileContent);
-      setSelectedFilePath(targetPath);
-      setIsDirty(false);
+      await window.electronAPI.writeFile(targetPath, activeTab.content);
+      const name = await window.electronAPI.getBasename(targetPath);
+      
+      setTabs(prev => prev.map(t => 
+        t.id === activeTab.id ? { ...t, id: targetPath!, path: targetPath!, name, isDirty: false } : t
+      ));
+      setActiveTabId(targetPath);
       setRefreshTrigger(prev => prev + 1);
-      console.log('File saved successfully');
     } catch (error) {
       console.error('Failed to save file:', error);
       alert('Failed to save file');
@@ -65,23 +129,52 @@ function App() {
       <aside className="w-64 border-r border-[#333333] flex-shrink-0">
         <FileTree 
           onFileSelect={handleFileSelect} 
-          selectedFilePath={selectedFilePath} 
+          selectedFilePath={activeTab?.path || null} 
           refreshTrigger={refreshTrigger}
+          workspacePath={workspacePath}
+          onWorkspaceChange={setWorkspacePath}
         />
       </aside>
-      <main className="flex-1 overflow-hidden">
-        <Editor
-          filePath={selectedFilePath}
-          content={fileContent}
-          onChange={handleContentChange}
-          onSave={handleSave}
-        />
-      </main>
-      {isDirty && (
-        <div className="fixed bottom-4 right-4 bg-yellow-600 text-white px-3 py-1 rounded text-xs shadow-lg animate-pulse">
-          Unsaved Changes
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Tab Bar */}
+        <div className="h-9 bg-[#252526] flex overflow-x-auto no-scrollbar border-b border-[#1e1e1e]">
+          {tabs.map(tab => (
+            <div
+              key={tab.id}
+              onClick={() => setActiveTabId(tab.id)}
+              className={cn(
+                "flex items-center px-3 min-w-[120px] max-w-[200px] h-full cursor-pointer border-r border-[#1e1e1e] select-none text-xs transition-colors",
+                activeTabId === tab.id ? "bg-[#1e1e1e] text-white" : "bg-[#2d2d2d] text-[#969696] hover:bg-[#2a2d2e]"
+              )}
+            >
+              <span className={cn("truncate flex-1", tab.isDirty && "font-bold italic")}>
+                {tab.name}{tab.isDirty && '*'}
+              </span>
+              <button
+                onClick={(e) => handleCloseTab(e, tab.id)}
+                className="ml-2 p-0.5 hover:bg-[#37373d] rounded text-[#969696] hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
         </div>
-      )}
+        
+        <div className="flex-1 overflow-hidden">
+          {activeTab ? (
+            <Editor
+              filePath={activeTab.path}
+              content={activeTab.content}
+              onChange={handleContentChange}
+              onSave={handleSave}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center text-[#555555]">
+              No files open
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }

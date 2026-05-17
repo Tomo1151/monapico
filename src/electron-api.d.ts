@@ -10,7 +10,8 @@ export interface IElectronAPI {
   writeFile: (path: string, content: string) => Promise<boolean>;
   getBasename: (path: string) => Promise<string>;
   getAppPath: () => Promise<string>;
-  showSaveDialog: () => Promise<string | null>;
+  showSaveDialog: (defaultPath?: string) => Promise<string | null>;
+  showOpenDialog: () => Promise<string | null>;
   onMainMessage: (callback: (message: string) => void) => void;
 }
 

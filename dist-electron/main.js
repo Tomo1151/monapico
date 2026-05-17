@@ -10,7 +10,7 @@ function createWindow() {
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.js")
+      preload: path.join(__dirname$1, "preload.mjs")
     },
     width: 1200,
     height: 800,
@@ -59,9 +59,11 @@ ipcMain.handle("path:getBasename", (_, filePath) => {
 ipcMain.handle("app:getAppPath", () => {
   return process.cwd();
 });
-ipcMain.handle("dialog:showSaveDialog", async () => {
-  const { filePath, canceled } = await dialog.showSaveDialog({
-    defaultPath: path.join(process.cwd(), "main.py"),
+ipcMain.handle("dialog:showSaveDialog", async (_, defaultDir) => {
+  console.log("IPC: dialog:showSaveDialog called with defaultDir:", defaultDir);
+  const parentWin = BrowserWindow.getFocusedWindow() || win;
+  const { filePath, canceled } = await dialog.showSaveDialog(parentWin, {
+    defaultPath: defaultDir ? path.join(defaultDir, "main.py") : path.join(process.cwd(), "main.py"),
     filters: [
       { name: "Python Files", extensions: ["py"] },
       { name: "All Files", extensions: ["*"] }
@@ -69,4 +71,14 @@ ipcMain.handle("dialog:showSaveDialog", async () => {
   });
   if (canceled) return null;
   return filePath;
+});
+ipcMain.handle("dialog:showOpenDialog", async () => {
+  console.log("IPC: dialog:showOpenDialog called");
+  const parentWin = BrowserWindow.getFocusedWindow() || win;
+  const { filePaths, canceled } = await dialog.showOpenDialog(parentWin, {
+    properties: ["openDirectory"]
+  });
+  console.log("IPC: dialog:showOpenDialog result:", { canceled, filePaths });
+  if (canceled) return null;
+  return filePaths[0];
 });
