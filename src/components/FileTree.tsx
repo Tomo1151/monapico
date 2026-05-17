@@ -1,8 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { Folder, File, ChevronRight, ChevronDown, FolderPlus } from 'lucide-react';
-import { FileEntry } from '../electron-api';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import React, { useEffect, useState } from "react";
+import {
+  Folder,
+  File,
+  ChevronRight,
+  ChevronDown,
+  FolderPlus,
+} from "lucide-react";
+import { FileEntry } from "../electron-api";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -16,16 +22,20 @@ interface FileTreeProps {
   onWorkspaceChange: (path: string) => void;
 }
 
-export const FileTree: React.FC<FileTreeProps> = ({ 
-  onFileSelect, 
-  selectedFilePath, 
+export const FileTree: React.FC<FileTreeProps> = ({
+  onFileSelect,
+  selectedFilePath,
   refreshTrigger,
   workspacePath,
-  onWorkspaceChange
+  onWorkspaceChange,
 }) => {
   const [files, setFiles] = useState<FileEntry[]>([]);
-  const [workspaceName, setWorkspaceName] = useState<string>('');
-  const [newInput, setNewInput] = useState<{ parentPath: string; level: number; isDirectory: boolean } | null>(null);
+  const [workspaceName, setWorkspaceName] = useState<string>("");
+  const [newInput, setNewInput] = useState<{
+    parentPath: string;
+    level: number;
+    isDirectory: boolean;
+  } | null>(null);
 
   const loadRoot = async () => {
     if (!workspacePath) return;
@@ -33,13 +43,15 @@ export const FileTree: React.FC<FileTreeProps> = ({
       const name = await window.electronAPI.getBasename(workspacePath);
       setWorkspaceName(name);
       const entries = await window.electronAPI.readdir(workspacePath);
-      setFiles(entries.sort((a, b) => {
-        if (a.isDirectory && !b.isDirectory) return -1;
-        if (!a.isDirectory && b.isDirectory) return 1;
-        return a.name.localeCompare(b.name);
-      }));
+      setFiles(
+        entries.sort((a, b) => {
+          if (a.isDirectory && !b.isDirectory) return -1;
+          if (!a.isDirectory && b.isDirectory) return 1;
+          return a.name.localeCompare(b.name);
+        }),
+      );
     } catch (error) {
-      console.error('Failed to load workspace:', error);
+      console.error("Failed to load workspace:", error);
     }
   };
 
@@ -48,21 +60,31 @@ export const FileTree: React.FC<FileTreeProps> = ({
   }, [workspacePath, refreshTrigger]);
 
   useEffect(() => {
-    const handleCreateNew = (data: { path: string; isDirectory: boolean }, isCreatingDirectory: boolean) => {
+    const handleCreateNew = (
+      data: { path: string; isDirectory: boolean },
+      isCreatingDirectory: boolean,
+    ) => {
       let parentPath = data.path;
       if (!data.isDirectory) {
-        parentPath = data.path.substring(0, Math.max(data.path.lastIndexOf('/'), data.path.lastIndexOf('\\')));
+        parentPath = data.path.substring(
+          0,
+          Math.max(data.path.lastIndexOf("/"), data.path.lastIndexOf("\\")),
+        );
       }
-      
-      const relPath = parentPath.replace(workspacePath, '');
+
+      const relPath = parentPath.replace(workspacePath, "");
       const level = relPath.split(/[\/\\]/).filter(Boolean).length;
 
       setNewInput({ parentPath, level, isDirectory: isCreatingDirectory });
     };
 
-    const unsubNewFile = window.electronAPI.onCreateNewFile((data) => handleCreateNew(data, false));
-    const unsubNewFolder = window.electronAPI.onCreateNewFolder((data) => handleCreateNew(data, true));
-    
+    const unsubNewFile = window.electronAPI.onCreateNewFile((data) =>
+      handleCreateNew(data, false),
+    );
+    const unsubNewFolder = window.electronAPI.onCreateNewFolder((data) =>
+      handleCreateNew(data, true),
+    );
+
     const unsubDelete = window.electronAPI.onDeleteItem(async (data) => {
       const name = await window.electronAPI.getBasename(data.path);
       if (window.confirm(`本当に「${name}」を削除しますか？`)) {
@@ -70,7 +92,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           await window.electronAPI.rm(data.path);
           loadRoot();
         } catch (error) {
-          alert('削除に失敗しました');
+          alert("削除に失敗しました");
         }
       }
     });
@@ -88,12 +110,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
       return;
     }
 
-    const fullPath = `${newInput.parentPath}/${name}`.replace(/\/\//g, '/');
+    const fullPath = `${newInput.parentPath}/${name}`.replace(/\/\//g, "/");
     try {
       if (newInput.isDirectory) {
         await window.electronAPI.mkdir(fullPath);
       } else {
-        await window.electronAPI.writeFile(fullPath, '');
+        await window.electronAPI.writeFile(fullPath, "");
       }
       setNewInput(null);
       await loadRoot();
@@ -101,7 +123,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
         onFileSelect(fullPath);
       }
     } catch (error) {
-      alert(newInput.isDirectory ? 'フォルダの作成に失敗しました' : 'ファイルの作成に失敗しました');
+      alert(
+        newInput.isDirectory
+          ? "フォルダの作成に失敗しました"
+          : "ファイルの作成に失敗しました",
+      );
       setNewInput(null);
     }
   };
@@ -115,7 +141,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
         onWorkspaceChange(path);
       }
     } catch (error: any) {
-      alert('Failed to open folder dialog: ' + (error.message || 'Unknown error'));
+      alert(
+        "Failed to open folder dialog: " + (error.message || "Unknown error"),
+      );
     }
   };
 
@@ -125,15 +153,15 @@ export const FileTree: React.FC<FileTreeProps> = ({
   };
 
   return (
-    <div 
-      className="h-full bg-[#252526] text-[#cccccc] flex flex-col overflow-hidden"
+    <div
+      className="h-full bg-panel text-text-primary flex flex-col overflow-hidden"
       onContextMenu={handleContextMenu}
     >
-      <div className="p-2 text-[10px] font-bold uppercase tracking-wider text-[#969696] flex justify-between items-center border-b border-[#333333]">
+      <div className="p-2 text-[10px] font-bold uppercase tracking-wider text-text-muted flex justify-between items-center border-b border-border">
         <span>Explorer</span>
-        <button 
+        <button
           onClick={handleOpenFolder}
-          className="hover:bg-[#37373d] p-1 rounded transition-colors"
+          className="hover:bg-selection p-1 rounded transition-colors"
           title="Open Folder"
           onContextMenu={(e) => e.stopPropagation()}
         >
@@ -141,14 +169,16 @@ export const FileTree: React.FC<FileTreeProps> = ({
         </button>
       </div>
       {workspaceName && (
-        <div className="px-4 py-2 text-xs font-bold text-[#cccccc] bg-[#2d2d2d] flex items-center shadow-sm">
-          <Folder size={14} className="mr-2 text-[#969696]" />
-          <span className="truncate uppercase tracking-tight">{workspaceName}</span>
+        <div className="px-4 py-2 text-xs font-bold text-text-primary bg-panel-alt flex items-center shadow-sm">
+          <Folder size={14} className="mr-2 text-text-muted" />
+          <span className="truncate uppercase tracking-tight">
+            {workspaceName}
+          </span>
         </div>
       )}
       <div className="flex-1 overflow-y-auto py-1">
         {files.length === 0 && !newInput && (
-          <div className="p-4 text-xs text-center text-[#666666]">
+          <div className="p-4 text-xs text-center text-text-subtle">
             No folder opened
           </div>
         )}
@@ -164,11 +194,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
           />
         ))}
         {newInput && newInput.parentPath === workspacePath && (
-          <NewInputItem 
-            level={0} 
+          <NewInputItem
+            level={0}
             isDirectory={newInput.isDirectory}
-            onSubmit={handleInputSubmit} 
-            onCancel={() => setNewInput(null)} 
+            onSubmit={handleInputSubmit}
+            onCancel={() => setNewInput(null)}
           />
         )}
       </div>
@@ -185,13 +215,13 @@ interface FileItemProps {
   onInputSubmit: (name: string) => void;
 }
 
-const FileItem: React.FC<FileItemProps> = ({ 
-  file, 
-  level, 
-  onFileSelect, 
-  selectedFilePath, 
-  newInput, 
-  onInputSubmit 
+const FileItem: React.FC<FileItemProps> = ({
+  file,
+  level,
+  onFileSelect,
+  selectedFilePath,
+  newInput,
+  onInputSubmit,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [children, setChildren] = useState<FileEntry[]>([]);
@@ -199,11 +229,13 @@ const FileItem: React.FC<FileItemProps> = ({
 
   const loadChildren = async () => {
     const entries = await window.electronAPI.readdir(file.path);
-    setChildren(entries.sort((a, b) => {
-      if (a.isDirectory && !b.isDirectory) return -1;
-      if (!a.isDirectory && b.isDirectory) return 1;
-      return a.name.localeCompare(b.name);
-    }));
+    setChildren(
+      entries.sort((a, b) => {
+        if (a.isDirectory && !b.isDirectory) return -1;
+        if (!a.isDirectory && b.isDirectory) return 1;
+        return a.name.localeCompare(b.name);
+      }),
+    );
   };
 
   useEffect(() => {
@@ -231,9 +263,9 @@ const FileItem: React.FC<FileItemProps> = ({
     <div>
       <div
         className={cn(
-          "flex items-center py-0.5 px-2 cursor-pointer hover:bg-[#2a2d2e] select-none",
-          isSelected && "bg-[#37373d] text-white",
-          file.isDirectory ? "text-[#cccccc]" : "text-[#cccccc]"
+          "flex items-center py-0.5 px-2 cursor-pointer hover:bg-panel-hover select-none",
+          isSelected && "bg-selection text-white",
+          file.isDirectory ? "text-text-primary" : "text-text-primary",
         )}
         style={{ paddingLeft: `${(level + 1) * 12}px` }}
         onClick={toggleFolder}
@@ -241,9 +273,13 @@ const FileItem: React.FC<FileItemProps> = ({
       >
         <span className="mr-1.5 flex-shrink-0">
           {file.isDirectory ? (
-            isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />
+            isOpen ? (
+              <ChevronDown size={16} />
+            ) : (
+              <ChevronRight size={16} />
+            )
           ) : (
-            <File size={16} className="text-[#519aba]" />
+            <File size={16} className="text-accent-blue" />
           )}
         </span>
         <span className="truncate text-sm">{file.name}</span>
@@ -262,11 +298,11 @@ const FileItem: React.FC<FileItemProps> = ({
             />
           ))}
           {newInput && newInput.parentPath === file.path && (
-            <NewInputItem 
-              level={level + 1} 
+            <NewInputItem
+              level={level + 1}
               isDirectory={newInput.isDirectory}
-              onSubmit={onInputSubmit} 
-              onCancel={() => onInputSubmit('')} 
+              onSubmit={onInputSubmit}
+              onCancel={() => onInputSubmit("")}
             />
           )}
         </div>
@@ -275,8 +311,13 @@ const FileItem: React.FC<FileItemProps> = ({
   );
 };
 
-const NewInputItem: React.FC<{ level: number, isDirectory: boolean, onSubmit: (name: string) => void, onCancel: () => void }> = ({ level, isDirectory, onSubmit, onCancel }) => {
-  const [value, setValue] = useState('');
+const NewInputItem: React.FC<{
+  level: number;
+  isDirectory: boolean;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}> = ({ level, isDirectory, onSubmit, onCancel }) => {
+  const [value, setValue] = useState("");
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -289,26 +330,30 @@ const NewInputItem: React.FC<{ level: number, isDirectory: boolean, onSubmit: (n
       return;
     }
 
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       onSubmit(value);
-    } else if (e.key === 'Escape') {
+    } else if (e.key === "Escape") {
       onCancel();
     }
   };
 
   return (
-    <div 
-      className="flex items-center py-0.5 px-2 bg-[#37373d]" 
+    <div
+      className="flex items-center py-0.5 px-2 bg-selection"
       style={{ paddingLeft: `${(level + 1) * 12}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <span className="mr-1.5 flex-shrink-0">
-        {isDirectory ? <Folder size={16} className="text-[#dcb67a]" /> : <File size={16} className="text-[#519aba]" />}
+        {isDirectory ? (
+          <Folder size={16} className="text-accent-warn" />
+        ) : (
+          <File size={16} className="text-accent-blue" />
+        )}
       </span>
       <input
         ref={inputRef}
         type="text"
-        className="bg-[#3c3c3c] text-white text-sm outline-none border border-[#007acc] w-full px-1 py-0"
+        className="bg-input text-white text-sm outline-none border border-accent-focus w-full px-1 py-0"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}

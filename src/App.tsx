@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { FileTree } from './components/FileTree';
-import { Editor } from './components/Editor';
-import { X, Plus } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import React, { useState, useEffect } from "react";
+import { FileTree } from "./components/FileTree";
+import { Editor } from "./components/Editor";
+import { X, Plus } from "lucide-react";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -20,27 +20,27 @@ interface Tab {
 function App() {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [workspacePath, setWorkspacePath] = useState<string>('');
+  const [workspacePath, setWorkspacePath] = useState<string>("");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const activeTab = tabs.find(t => t.id === activeTabId) || null;
+  const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
   const createNewUntitledTab = () => {
     const untitledId = `untitled-${Date.now()}`;
     const newTab: Tab = {
       id: untitledId,
       path: null,
-      name: 'Untitled',
-      content: '',
-      isDirty: false
+      name: "Untitled",
+      content: "",
+      isDirty: false,
     };
-    setTabs(prev => [...prev, newTab]);
+    setTabs((prev) => [...prev, newTab]);
     setActiveTabId(untitledId);
   };
 
   const handleFileSelect = async (path: string) => {
     // Check if file is already open
-    const existingTab = tabs.find(t => t.path === path);
+    const existingTab = tabs.find((t) => t.path === path);
     if (existingTab) {
       setActiveTabId(existingTab.id);
       return;
@@ -54,13 +54,13 @@ function App() {
         path,
         name,
         content,
-        isDirty: false
+        isDirty: false,
       };
-      setTabs(prev => [...prev, newTab]);
+      setTabs((prev) => [...prev, newTab]);
       setActiveTabId(path);
     } catch (error) {
-      console.error('Failed to read file:', error);
-      alert('Failed to read file');
+      console.error("Failed to read file:", error);
+      alert("Failed to read file");
     }
   };
 
@@ -69,14 +69,14 @@ function App() {
     const init = async () => {
       const path = await window.electronAPI.getAppPath();
       setWorkspacePath(path);
-      
+
       const untitledId = `untitled-${Date.now()}`;
       const newTab: Tab = {
         id: untitledId,
         path: null,
-        name: 'Untitled',
-        content: '',
-        isDirty: false
+        name: "Untitled",
+        content: "",
+        isDirty: false,
       };
       setTabs([newTab]);
       setActiveTabId(untitledId);
@@ -86,14 +86,16 @@ function App() {
 
   const handleCloseTab = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const tabToClose = tabs.find(t => t.id === id);
+    const tabToClose = tabs.find((t) => t.id === id);
     if (tabToClose?.isDirty) {
-      if (!window.confirm(`${tabToClose.name} has unsaved changes. Close anyway?`)) {
+      if (
+        !window.confirm(`${tabToClose.name} has unsaved changes. Close anyway?`)
+      ) {
         return;
       }
     }
 
-    const newTabs = tabs.filter(t => t.id !== id);
+    const newTabs = tabs.filter((t) => t.id !== id);
     setTabs(newTabs);
 
     if (activeTabId === id) {
@@ -107,9 +109,11 @@ function App() {
 
   const handleContentChange = (value: string | undefined) => {
     if (value !== undefined && activeTabId) {
-      setTabs(prev => prev.map(t => 
-        t.id === activeTabId ? { ...t, content: value, isDirty: true } : t
-      ));
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === activeTabId ? { ...t, content: value, isDirty: true } : t,
+        ),
+      );
     }
   };
 
@@ -125,24 +129,28 @@ function App() {
     try {
       await window.electronAPI.writeFile(targetPath, activeTab.content);
       const name = await window.electronAPI.getBasename(targetPath);
-      
-      setTabs(prev => prev.map(t => 
-        t.id === activeTab.id ? { ...t, id: targetPath!, path: targetPath!, name, isDirty: false } : t
-      ));
+
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === activeTab.id
+            ? { ...t, id: targetPath!, path: targetPath!, name, isDirty: false }
+            : t,
+        ),
+      );
       setActiveTabId(targetPath);
-      setRefreshTrigger(prev => prev + 1);
+      setRefreshTrigger((prev) => prev + 1);
     } catch (error) {
-      console.error('Failed to save file:', error);
-      alert('Failed to save file');
+      console.error("Failed to save file:", error);
+      alert("Failed to save file");
     }
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#1e1e1e]">
-      <aside className="w-64 border-r border-[#333333] flex-shrink-0">
-        <FileTree 
-          onFileSelect={handleFileSelect} 
-          selectedFilePath={activeTab?.path || null} 
+    <div className="flex h-screen w-screen overflow-hidden bg-app">
+      <aside className="w-64 border-r border-border flex-shrink-0">
+        <FileTree
+          onFileSelect={handleFileSelect}
+          selectedFilePath={activeTab?.path || null}
           refreshTrigger={refreshTrigger}
           workspacePath={workspacePath}
           onWorkspaceChange={setWorkspacePath}
@@ -150,38 +158,46 @@ function App() {
       </aside>
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Tab Bar */}
-        <div className="h-9 bg-[#252526] flex items-center overflow-hidden border-b border-[#1e1e1e]">
+        <div className="h-9 bg-panel flex items-center overflow-hidden border-b border-border-subtle">
           <div className="flex-1 flex overflow-x-auto no-scrollbar h-full">
-            {tabs.map(tab => (
+            {tabs.map((tab) => (
               <div
                 key={tab.id}
                 onClick={() => setActiveTabId(tab.id)}
                 className={cn(
-                  "flex items-center px-3 min-w-[120px] max-w-[200px] h-full cursor-pointer border-r border-[#1e1e1e] select-none text-xs transition-colors",
-                  activeTabId === tab.id ? "bg-[#1e1e1e] text-white" : "bg-[#2d2d2d] text-[#969696] hover:bg-[#2a2d2e]"
+                  "flex items-center px-3 min-w-[120px] max-w-[200px] h-full cursor-pointer border-r border-border-subtle select-none text-xs transition-colors",
+                  activeTabId === tab.id
+                    ? "bg-app text-white"
+                    : "bg-panel-alt text-text-muted hover:bg-panel-hover",
                 )}
               >
-                <span className={cn("truncate flex-1", tab.isDirty && "font-bold italic")}>
-                  {tab.name}{tab.isDirty && '*'}
+                <span
+                  className={cn(
+                    "truncate flex-1",
+                    tab.isDirty && "font-bold italic",
+                  )}
+                >
+                  {tab.name}
+                  {tab.isDirty && "*"}
                 </span>
                 <button
                   onClick={(e) => handleCloseTab(e, tab.id)}
-                  className="ml-2 p-0.5 hover:bg-[#37373d] rounded text-[#969696] hover:text-white"
+                  className="ml-2 p-0.5 hover:bg-selection rounded text-text-muted hover:text-white"
                 >
                   <X size={12} />
                 </button>
               </div>
             ))}
           </div>
-          <button 
+          <button
             onClick={createNewUntitledTab}
-            className="px-3 h-full flex items-center justify-center text-[#969696] hover:text-white hover:bg-[#2d2d2d] border-l border-[#1e1e1e] transition-colors"
+            className="px-3 h-full flex items-center justify-center text-text-muted hover:text-white hover:bg-panel-alt border-l border-border-subtle transition-colors"
             title="New Untitled File"
           >
             <Plus size={16} />
           </button>
         </div>
-        
+
         <div className="flex-1 overflow-hidden">
           {activeTab ? (
             <Editor
@@ -191,7 +207,7 @@ function App() {
               onSave={handleSave}
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-[#555555]">
+            <div className="h-full flex items-center justify-center text-text-faint">
               No files open
             </div>
           )}
