@@ -434,10 +434,14 @@ const picoReadFile = async (picoPath: string) => {
     "print(ubinascii.b2a_base64(data).decode().strip())\n";
 
   const output = await runRawReplCommand(script, 5000);
-  if (!output || output.startsWith("ERR:")) {
+  if (output.startsWith("ERR:")) {
     throw new Error("Failed to read Pico file");
   }
-  return Buffer.from(output.trim(), "base64").toString("utf-8");
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return Buffer.from(trimmed, "base64").toString("utf-8");
 };
 
 const picoWriteFile = async (picoPath: string, content: string) => {
@@ -684,10 +688,12 @@ ipcMain.handle("pico:serial-write", async (_, data: string) => {
 ipcMain.handle("dialog:showSaveDialog", async (_, defaultDir?: string) => {
   console.log("IPC: dialog:showSaveDialog called with defaultDir:", defaultDir);
   const parentWin = BrowserWindow.getFocusedWindow() || win;
-  const { filePath, canceled } = await dialog.showSaveDialog(parentWin!, {
-    defaultPath: defaultDir
+  const defaultPath =
+    defaultDir && !isPicoPath(defaultDir)
       ? path.join(defaultDir, "main.py")
-      : path.join(process.cwd(), "main.py"),
+      : path.join(process.cwd(), "main.py");
+  const { filePath, canceled } = await dialog.showSaveDialog(parentWin!, {
+    defaultPath,
     filters: [
       { name: "Python Files", extensions: ["py"] },
       { name: "All Files", extensions: ["*"] },

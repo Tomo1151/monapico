@@ -182,8 +182,33 @@ function App() {
 
     let targetPath = activeTab.path;
     if (!targetPath) {
-      targetPath = await window.electronAPI.showSaveDialog(workspacePath);
-      if (!targetPath) return;
+      if (workspacePath.startsWith("pico:")) {
+        const suggestedName =
+          activeTab.name && activeTab.name !== "Untitled"
+            ? activeTab.name
+            : "main.py";
+        const inputName = window.prompt(
+          "Picoへ保存するファイル名を入力してください",
+          suggestedName,
+        );
+        if (!inputName) return;
+
+        const normalizedName = inputName
+          .trim()
+          .replace(/\\/g, "/")
+          .replace(/^\/+/, "");
+
+        if (!normalizedName) {
+          alert("ファイル名を入力してください");
+          return;
+        }
+
+        const basePath = workspacePath.replace(/\/+$/, "");
+        targetPath = `${basePath}/${normalizedName}`;
+      } else {
+        targetPath = await window.electronAPI.showSaveDialog(workspacePath);
+        if (!targetPath) return;
+      }
     }
 
     try {

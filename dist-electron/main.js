@@ -7,7 +7,9 @@ import { promisify } from "node:util";
 import { SerialPort } from "serialport";
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 process.env.DIST = path.join(__dirname$1, "../dist");
-process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, "../public");
+process.env.VITE_PUBLIC = app.isPackaged
+  ? process.env.DIST
+  : path.join(process.env.DIST, "../public");
 const execFileAsync = promisify(execFile);
 let win;
 let picoConnected = false;
@@ -33,7 +35,7 @@ const runPowerShell = async (command) => {
     const { stdout } = await execFileAsync(
       "powershell.exe",
       ["-NoProfile", "-Command", command],
-      { windowsHide: true }
+      { windowsHide: true },
     );
     return stdout.trim();
   } catch (error) {
@@ -93,7 +95,7 @@ const detectPicoBootVolume = async () => {
   if (process.platform === "darwin") {
     const volumeEntries = await fs.readdir("/Volumes").catch(() => []);
     return volumeEntries.some(
-      (name) => name.toLowerCase() === PICO_VOLUME_LABEL.toLowerCase()
+      (name) => name.toLowerCase() === PICO_VOLUME_LABEL.toLowerCase(),
     );
   }
   if (process.platform === "linux") {
@@ -101,7 +103,7 @@ const detectPicoBootVolume = async () => {
   }
   if (process.platform === "win32") {
     const volumeOutput = await runPowerShell(
-      `Get-CimInstance Win32_LogicalDisk | Where-Object { $_.VolumeName -eq '${PICO_VOLUME_LABEL}' } | Select-Object -First 1 -ExpandProperty DeviceID`
+      `Get-CimInstance Win32_LogicalDisk | Where-Object { $_.VolumeName -eq '${PICO_VOLUME_LABEL}' } | Select-Object -First 1 -ExpandProperty DeviceID`,
     );
     return volumeOutput.length > 0;
   }
@@ -122,7 +124,7 @@ const serializePortInfo = (port) => ({
   serialNumber: port.serialNumber,
   vendorId: port.vendorId,
   productId: port.productId,
-  pnpId: port.pnpId
+  pnpId: port.pnpId,
 });
 const resolveSerialCapture = (data) => {
   if (!serialCapture) return;
@@ -155,7 +157,7 @@ const awaitSerialOutput = (match, timeoutMs) => {
       match,
       resolve,
       reject,
-      timer
+      timer,
     };
   });
 };
@@ -193,7 +195,10 @@ const writeToPort = async (data) => {
 };
 const sanitizeRawReplOutput = (data) => {
   const eotIndex = data.indexOf(RAW_REPL_EOT);
-  const trimmed = (eotIndex >= 0 ? data.slice(0, eotIndex) : data).replace(/\r/g, "").replace(/^OK\n?/, "").trim();
+  const trimmed = (eotIndex >= 0 ? data.slice(0, eotIndex) : data)
+    .replace(/\r/g, "")
+    .replace(/^OK\n?/, "")
+    .trim();
   return trimmed;
 };
 const runRawReplCommand = async (script, timeoutMs) => {
@@ -205,13 +210,13 @@ const runRawReplCommand = async (script, timeoutMs) => {
   await writeToPort(RAW_REPL_ENTER);
   await awaitSerialOutput(
     (buffer) => buffer.includes(RAW_REPL_READY_TOKEN),
-    1e3
+    1e3,
   ).catch(() => "");
   await writeToPort(script);
   await writeToPort(RAW_REPL_EOT);
   const output = await awaitSerialOutput(
     (buffer) => buffer.includes(RAW_REPL_EOT),
-    timeoutMs ?? RAW_REPL_DEFAULT_TIMEOUT_MS
+    timeoutMs ?? RAW_REPL_DEFAULT_TIMEOUT_MS,
   );
   await writeToPort(RAW_REPL_EXIT);
   return sanitizeRawReplOutput(output);
@@ -242,7 +247,10 @@ const closePicoSerialPort = async () => {
   return closed;
 };
 const openPicoSerialPort = async (portPath, baudRate) => {
-  if ((picoSerialPort == null ? void 0 : picoSerialPort.isOpen) && picoSerialPath === portPath) {
+  if (
+    (picoSerialPort == null ? void 0 : picoSerialPort.isOpen) &&
+    picoSerialPath === portPath
+  ) {
     return true;
   }
   if (picoSerialPort) {
@@ -331,7 +339,7 @@ _list('${safePath}')
     return entries.map(([name, isDirectory]) => ({
       name,
       isDirectory,
-      path: toPicoPath(path.posix.join(devicePath, name))
+      path: toPicoPath(path.posix.join(devicePath, name)),
     }));
   } catch (error) {
     return [];
@@ -348,10 +356,14 @@ with open('${safePath}', 'rb') as f:
 print(ubinascii.b2a_base64(data).decode().strip())
 `;
   const output = await runRawReplCommand(script, 5e3);
-  if (!output || output.startsWith("ERR:")) {
+  if (output.startsWith("ERR:")) {
     throw new Error("Failed to read Pico file");
   }
-  return Buffer.from(output.trim(), "base64").toString("utf-8");
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return Buffer.from(trimmed, "base64").toString("utf-8");
 };
 const picoWriteFile = async (picoPath, content) => {
   const connected = await ensurePicoSerialConnected();
@@ -399,7 +411,10 @@ const picoRm = async (picoPath) => {
   if (!connected) return false;
   const devicePath = toDevicePath(picoPath);
   const safePath = escapePyString(devicePath);
-  const script = "import uos\ndef _rm(path):\n    try:\n        mode = uos.stat(path)[0]\n        if mode & 0x4000:\n            for name in uos.listdir(path):\n                child = (path.rstrip('/') + '/' + name) if path not in ('', '/') else '/' + name\n                _rm(child)\n            uos.rmdir(path)\n        else:\n            uos.remove(path)\n    except Exception as e:\n        print('ERR:' + repr(e))\n_rm('" + safePath + "')\nprint('OK')\n";
+  const script =
+    "import uos\ndef _rm(path):\n    try:\n        mode = uos.stat(path)[0]\n        if mode & 0x4000:\n            for name in uos.listdir(path):\n                child = (path.rstrip('/') + '/' + name) if path not in ('', '/') else '/' + name\n                _rm(child)\n            uos.rmdir(path)\n        else:\n            uos.remove(path)\n    except Exception as e:\n        print('ERR:' + repr(e))\n_rm('" +
+    safePath +
+    "')\nprint('OK')\n";
   try {
     const output = await runRawReplCommand(script, 6e3);
     return output.includes("OK");
@@ -418,14 +433,20 @@ const startPicoWatcher = () => {
       const serialFound = picoPorts.length > 0;
       const bootFound = await detectPicoBootVolume();
       const isConnected = serialFound || bootFound;
-      if (serialFound && !(picoSerialPort == null ? void 0 : picoSerialPort.isOpen)) {
+      if (
+        serialFound &&
+        !(picoSerialPort == null ? void 0 : picoSerialPort.isOpen)
+      ) {
         await openPicoSerialPort(picoPorts[0].path, DEFAULT_BAUD_RATE);
       }
       if (isConnected !== picoConnected) {
         picoConnected = isConnected;
         sendToRenderer("pico:connection-changed", picoConnected);
       }
-      if (!serialFound && (picoSerialPort == null ? void 0 : picoSerialPort.isOpen)) {
+      if (
+        !serialFound &&
+        (picoSerialPort == null ? void 0 : picoSerialPort.isOpen)
+      ) {
         await closePicoSerialPort();
       }
     } finally {
@@ -444,14 +465,19 @@ function createWindow() {
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs")
+      preload: path.join(__dirname$1, "preload.mjs"),
     },
     width: 1200,
     height: 800,
-    backgroundColor: "#1e1e1e"
+    backgroundColor: "#1e1e1e",
   });
   win.webContents.on("did-finish-load", () => {
-    win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+    win == null
+      ? void 0
+      : win.webContents.send(
+          "main-process-message",
+          /* @__PURE__ */ new Date().toLocaleString(),
+        );
     startPicoWatcher();
   });
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -478,12 +504,14 @@ ipcMain.handle("fs:readdir", async (_, dirPath) => {
   if (isPicoPath(dirPath)) {
     return await picoFsList(dirPath);
   }
-  const absolutePath = path.isAbsolute(dirPath) ? dirPath : path.join(process.cwd(), dirPath);
+  const absolutePath = path.isAbsolute(dirPath)
+    ? dirPath
+    : path.join(process.cwd(), dirPath);
   const entries = await fs.readdir(absolutePath, { withFileTypes: true });
   return entries.map((entry) => ({
     name: entry.name,
     isDirectory: entry.isDirectory(),
-    path: path.join(absolutePath, entry.name)
+    path: path.join(absolutePath, entry.name),
   }));
 });
 ipcMain.handle("fs:readFile", async (_, filePath) => {
@@ -533,12 +561,9 @@ ipcMain.handle("serial:list", async () => {
   const ports = await listSerialPorts();
   return ports.map(serializePortInfo);
 });
-ipcMain.handle(
-  "pico:serial-connect",
-  async (_, portPath, baudRate) => {
-    return await openPicoSerialPort(portPath, baudRate ?? DEFAULT_BAUD_RATE);
-  }
-);
+ipcMain.handle("pico:serial-connect", async (_, portPath, baudRate) => {
+  return await openPicoSerialPort(portPath, baudRate ?? DEFAULT_BAUD_RATE);
+});
 ipcMain.handle("pico:serial-disconnect", async () => {
   return await closePicoSerialPort();
 });
@@ -548,12 +573,16 @@ ipcMain.handle("pico:serial-write", async (_, data) => {
 ipcMain.handle("dialog:showSaveDialog", async (_, defaultDir) => {
   console.log("IPC: dialog:showSaveDialog called with defaultDir:", defaultDir);
   const parentWin = BrowserWindow.getFocusedWindow() || win;
+  const defaultPath =
+    defaultDir && !isPicoPath(defaultDir)
+      ? path.join(defaultDir, "main.py")
+      : path.join(process.cwd(), "main.py");
   const { filePath, canceled } = await dialog.showSaveDialog(parentWin, {
-    defaultPath: defaultDir ? path.join(defaultDir, "main.py") : path.join(process.cwd(), "main.py"),
+    defaultPath,
     filters: [
       { name: "Python Files", extensions: ["py"] },
-      { name: "All Files", extensions: ["*"] }
-    ]
+      { name: "All Files", extensions: ["*"] },
+    ],
   });
   if (canceled) return null;
   return filePath;
@@ -562,7 +591,7 @@ ipcMain.handle("dialog:showOpenDialog", async () => {
   console.log("IPC: dialog:showOpenDialog called");
   const parentWin = BrowserWindow.getFocusedWindow() || win;
   const { filePaths, canceled } = await dialog.showOpenDialog(parentWin, {
-    properties: ["openDirectory"]
+    properties: ["openDirectory"],
   });
   console.log("IPC: dialog:showOpenDialog result:", { canceled, filePaths });
   if (canceled) return null;
@@ -575,31 +604,37 @@ ipcMain.on(
       {
         label: "新しいファイルを作成",
         click: () => {
-          event.sender.send("explorer:create-new-file", { path: path2, isDirectory });
-        }
+          event.sender.send("explorer:create-new-file", {
+            path: path2,
+            isDirectory,
+          });
+        },
       },
       {
         label: "新しいフォルダを作成",
         click: () => {
           event.sender.send("explorer:create-new-folder", {
             path: path2,
-            isDirectory
+            isDirectory,
           });
-        }
-      }
+        },
+      },
     ];
     if (canDelete) {
       template.push({ type: "separator" });
       template.push({
         label: "削除",
         click: () => {
-          event.sender.send("explorer:delete-item", { path: path2, isDirectory });
-        }
+          event.sender.send("explorer:delete-item", {
+            path: path2,
+            isDirectory,
+          });
+        },
       });
     }
     const menu = Menu.buildFromTemplate(template);
     menu.popup({
-      window: BrowserWindow.fromWebContents(event.sender)
+      window: BrowserWindow.fromWebContents(event.sender),
     });
-  }
+  },
 );
