@@ -15,7 +15,8 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src", "electron", "vite.config.ts"]
 }
