@@ -714,6 +714,19 @@ ipcMain.handle("dialog:showOpenDialog", async () => {
   return filePaths[0];
 });
 
+ipcMain.handle("dialog:showOpenFileDialog", async () => {
+  const parentWin = BrowserWindow.getFocusedWindow() || win;
+  const { filePaths, canceled } = await dialog.showOpenDialog(parentWin!, {
+    properties: ["openFile"],
+    filters: [
+      { name: "Python Files", extensions: ["py"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  });
+  if (canceled) return null;
+  return filePaths[0] ?? null;
+});
+
 ipcMain.on(
   "explorer:showContextMenu",
   (event, path: string, isDirectory: boolean, canDelete: boolean = true) => {

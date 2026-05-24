@@ -28,6 +28,7 @@ export interface IElectronAPI {
   writePicoSerial: (data: string) => Promise<boolean>;
   showSaveDialog: (defaultPath?: string) => Promise<string | null>;
   showOpenDialog: () => Promise<string | null>;
+  showOpenFileDialog: () => Promise<string | null>;
   showExplorerContextMenu: (
     path: string,
     isDirectory: boolean,

@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   showSaveDialog: (defaultPath?: string) =>
     ipcRenderer.invoke("dialog:showSaveDialog", defaultPath),
   showOpenDialog: () => ipcRenderer.invoke("dialog:showOpenDialog"),
+  showOpenFileDialog: () => ipcRenderer.invoke("dialog:showOpenFileDialog"),
   showExplorerContextMenu: (
     path: string,
     isDirectory: boolean,
